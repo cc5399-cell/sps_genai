@@ -7,7 +7,7 @@ RUN sh /uv-installer.sh && rm /uv-installer.sh
 ENV PATH="/root/.local/bin/:$PATH"
 
 WORKDIR /code
-COPY pyproject.toml uv.lock /code/
+COPY pyproject.toml uv.lock .python-version /code/
 RUN uv sync --frozen --no-install-project
 
 COPY ./app /code/app
