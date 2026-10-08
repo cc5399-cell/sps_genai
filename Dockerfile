@@ -11,5 +11,7 @@ COPY pyproject.toml uv.lock .python-version /code/
 RUN uv sync --frozen --no-install-project
 
 COPY ./app /code/app
+COPY ./helper_lib /code/helper_lib
+COPY ./models /code/models
 
 CMD ["/code/.venv/bin/fastapi", "run", "app/main.py", "--port", "80"]

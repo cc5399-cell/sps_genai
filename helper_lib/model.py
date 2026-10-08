@@ -148,3 +148,44 @@ def get_model(model_name):
         if name.lower() == model_name.lower():
             return model_class()
     raise ValueError(f"Unknown model '{model_name}'. Choose one of: {', '.join(MODELS)}")
+
+
+# ---------- Assignment 2: CNN built to the given specification ----------
+
+CIFAR10_CLASSES = [
+    "airplane", "automobile", "bird", "cat", "deer",
+    "dog", "frog", "horse", "ship", "truck",
+]
+
+
+class AssignmentCNN(nn.Module):
+    """CNN from the Assignment 2 specification.
+
+    Shape trace for a 64x64x3 input:
+      Conv2d(3->16, 3x3, stride 1, pad 1) + ReLU   -> 64x64x16
+      MaxPool2d(2x2, stride 2)                     -> 32x32x16
+      Conv2d(16->32, 3x3, stride 1, pad 1) + ReLU  -> 32x32x32
+      MaxPool2d(2x2, stride 2)                     -> 16x16x32
+      Flatten                                      -> 8192
+      Linear(8192 -> 100) + ReLU                   -> 100
+      Linear(100 -> 10)                            -> 10 class scores
+    """
+
+    def __init__(self, num_classes=10):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(32 * 16 * 16, 100)
+        self.fc2 = nn.Linear(100, num_classes)
+
+    def forward(self, x):
+        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.conv2(x)))
+        x = self.flatten(x)
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
+
+
+MODELS["AssignmentCNN"] = AssignmentCNN

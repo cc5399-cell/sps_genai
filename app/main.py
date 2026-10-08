@@ -1,7 +1,11 @@
-from fastapi import FastAPI, HTTPException
+import io
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from app.bigram_model import BigramModel
+from app.classifier import ImageClassifier
 from app.embeddings import WordEmbedder
 
 app = FastAPI(title="SPS GenAI API")
@@ -17,6 +21,11 @@ It tells the story of Edmond Dantès, who is falsely imprisoned and later seeks 
 
 bigram_model = BigramModel(corpus)
 embedder = WordEmbedder()
+
+try:
+    classifier = ImageClassifier()
+except FileNotFoundError:
+    classifier = None  # weights missing: run `uv run python train_classifier.py`
 
 
 # ---------- Request / response models ----------
@@ -45,6 +54,17 @@ class SimilarityResponse(BaseModel):
     word1: str
     word2: str
     similarity: float
+
+
+class ClassPrediction(BaseModel):
+    label: str
+    probability: float
+
+
+class ClassificationResponse(BaseModel):
+    predicted_class: str
+    confidence: float
+    top_predictions: list[ClassPrediction]
 
 
 # ---------- Endpoints ----------
@@ -78,3 +98,25 @@ def get_similarity(request: SimilarityRequest):
     except ValueError as err:
         raise HTTPException(status_code=404, detail=str(err))
     return SimilarityResponse(word1=request.word1, word2=request.word2, similarity=score)
+
+
+@app.post("/classify", response_model=ClassificationResponse)
+async def classify_image(file: UploadFile = File(..., description="An image file (PNG or JPEG)")):
+    """Classify an uploaded image into one of the 10 CIFAR-10 classes."""
+    if classifier is None:
+        raise HTTPException(status_code=503,
+                            detail="Classifier weights not found. Run: uv run python train_classifier.py")
+    contents = await file.read()
+    try:
+        image = Image.open(io.BytesIO(contents))
+    except UnidentifiedImageError:
+        raise HTTPException(status_code=400, detail="The uploaded file is not a valid image.")
+    return classifier.predict(image)
+
+
+@app.get("/classify/model")
+def classifier_info():
+    """Describe the CNN behind /classify (architecture, parameter count, classes)."""
+    if classifier is None:
+        raise HTTPException(status_code=503, detail="Classifier weights not found.")
+    return classifier.describe()
