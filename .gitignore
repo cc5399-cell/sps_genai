@@ -13,3 +13,7 @@ dist/
 
 # Secrets
 .env
+
+# Datasets and trained weights
+data/
+checkpoints/
