@@ -243,3 +243,55 @@ class GAN(nn.Module):
 
 
 MODELS["GAN"] = GAN
+
+
+# ---------- Assignment 3: GAN built to the given specification (MNIST, 1x28x28) ----------
+
+class MNISTGenerator(nn.Module):
+    """Noise (batch, 100) -> FC to 7x7x128 -> ConvT 128->64 (14x14) + BN + ReLU -> ConvT 64->1 (28x28) + Tanh."""
+
+    def __init__(self, z_dim=100):
+        super().__init__()
+        self.z_dim = z_dim
+        self.fc = nn.Linear(z_dim, 7 * 7 * 128)
+        self.deconv1 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)  # 7x7 -> 14x14
+        self.bn1 = nn.BatchNorm2d(64)
+        self.deconv2 = nn.ConvTranspose2d(64, 1, kernel_size=4, stride=2, padding=1)    # 14x14 -> 28x28
+
+    def forward(self, z):
+        x = self.fc(z).view(-1, 128, 7, 7)       # reshape to 128 x 7 x 7
+        x = F.relu(self.bn1(self.deconv1(x)))
+        return torch.tanh(self.deconv2(x))       # pixels in [-1, 1]
+
+
+class MNISTDiscriminator(nn.Module):
+    """Image (1x28x28) -> Conv 1->64 (14x14) + LeakyReLU -> Conv 64->128 (7x7) + BN + LeakyReLU -> Flatten -> Linear -> 1."""
+
+    def __init__(self):
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 64, kernel_size=4, stride=2, padding=1)    # 28x28 -> 14x14
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1)  # 14x14 -> 7x7
+        self.bn2 = nn.BatchNorm2d(128)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(128 * 7 * 7, 1)
+
+    def forward(self, x):
+        x = F.leaky_relu(self.conv1(x), 0.2)
+        x = F.leaky_relu(self.bn2(self.conv2(x)), 0.2)
+        return self.fc(self.flatten(x))  # logit; sigmoid(logit) = probability the image is real
+
+
+class MNISTGAN(nn.Module):
+    """Holds the generator and discriminator together so the GAN works with get_model()."""
+
+    def __init__(self, z_dim=100):
+        super().__init__()
+        self.z_dim = z_dim
+        self.generator = MNISTGenerator(z_dim)
+        self.discriminator = MNISTDiscriminator()
+
+    def forward(self, z):
+        return self.generator(z)
+
+
+MODELS["MNISTGAN"] = MNISTGAN

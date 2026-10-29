@@ -152,3 +152,48 @@ def train_gan(model, data_loader, criterion=None, optimizer=None, device="cpu", 
 
     print("Finished Training")
     return model
+
+
+def train_standard_gan(model, data_loader, criterion=None, optimizer=None, device="cpu", epochs=10, lr=2e-4):
+    """Train a standard GAN with binary cross-entropy (Module 6 GAN losses) and return it.
+
+    Discriminator loss: -[log D(x) + log(1 - D(G(z)))]
+    Generator loss:     -log D(G(z))
+    criterion: defaults to BCEWithLogitsLoss (applies the sigmoid to the discriminator's output).
+    optimizer: (generator_optimizer, discriminator_optimizer); defaults to Adam(lr, betas=(0.5, 0.999)).
+    """
+    gen, disc = model.generator.to(device), model.discriminator.to(device)
+    criterion = criterion or torch.nn.BCEWithLogitsLoss()
+    if optimizer is None:
+        optimizer = (torch.optim.Adam(gen.parameters(), lr=lr, betas=(0.5, 0.999)),
+                     torch.optim.Adam(disc.parameters(), lr=lr, betas=(0.5, 0.999)))
+    opt_gen, opt_disc = optimizer
+    model.train()
+
+    for epoch in range(epochs):
+        progress = tqdm(data_loader, dynamic_ncols=True, desc=f"Epoch {epoch + 1}/{epochs}")
+        for real, _ in progress:
+            real = real.to(device)
+            batch_size = real.size(0)
+            real_labels = torch.ones(batch_size, 1, device=device)
+            fake_labels = torch.zeros(batch_size, 1, device=device)
+
+            # Train the discriminator: real images -> 1, generated images -> 0
+            fake = gen(torch.randn(batch_size, model.z_dim, device=device))
+            loss_disc = criterion(disc(real), real_labels) + criterion(disc(fake.detach()), fake_labels)
+            opt_disc.zero_grad()
+            loss_disc.backward()
+            opt_disc.step()
+
+            # Train the generator: make the discriminator call generated images real
+            loss_gen = criterion(disc(fake), real_labels)
+            opt_gen.zero_grad()
+            loss_gen.backward()
+            opt_gen.step()
+
+            progress.set_postfix({"D loss": f"{loss_disc.item():.4f}", "G loss": f"{loss_gen.item():.4f}"})
+
+        print(f"Epoch {epoch + 1}: D loss={loss_disc.item():.4f}, G loss={loss_gen.item():.4f}")
+
+    print("Finished Training")
+    return model

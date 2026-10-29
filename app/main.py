@@ -1,12 +1,14 @@
 import io
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from app.bigram_model import BigramModel
 from app.classifier import ImageClassifier
 from app.embeddings import WordEmbedder
+from app.gan_generator import DigitGenerator
 
 app = FastAPI(title="SPS GenAI API")
 
@@ -26,6 +28,11 @@ try:
     classifier = ImageClassifier()
 except FileNotFoundError:
     classifier = None  # weights missing: run `uv run python train_classifier.py`
+
+try:
+    digit_generator = DigitGenerator()
+except FileNotFoundError:
+    digit_generator = None  # weights missing: run `uv run python train_mnist_gan.py`
 
 
 # ---------- Request / response models ----------
@@ -120,3 +127,24 @@ def classifier_info():
     if classifier is None:
         raise HTTPException(status_code=503, detail="Classifier weights not found.")
     return classifier.describe()
+
+
+@app.get("/gan/digits", response_class=Response,
+         responses={200: {"content": {"image/png": {}}, "description": "A grid of generated digits"}})
+def generate_digits(
+    num_images: int = Query(16, ge=1, le=64, description="How many digits to generate (1-64)"),
+    seed: int | None = Query(None, description="Optional seed for reproducible output"),
+):
+    """Generate new hand-written digits with the GAN trained on MNIST and return them as a PNG grid."""
+    if digit_generator is None:
+        raise HTTPException(status_code=503,
+                            detail="GAN weights not found. Run: uv run python train_mnist_gan.py")
+    return Response(content=digit_generator.generate_png(num_images, seed), media_type="image/png")
+
+
+@app.get("/gan/model")
+def gan_info():
+    """Describe the GAN behind /gan/digits (generator and discriminator architecture)."""
+    if digit_generator is None:
+        raise HTTPException(status_code=503, detail="GAN weights not found.")
+    return digit_generator.describe()

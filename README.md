@@ -67,3 +67,22 @@ curl -X POST http://127.0.0.1:8000/classify -F "file=@samples/1_ship.png"
 ```
 
 Retrain the model: `uv run python train_classifier.py 10`
+
+## Assignment 3: GAN for hand-written digits
+
+`helper_lib/model.py` → `MNISTGenerator`, `MNISTDiscriminator` (wrapped in `MNISTGAN`) implement the specified
+architecture. `train_mnist_gan.py` trains it on MNIST with `train_standard_gan` (`helper_lib/trainer.py`);
+the trained weights are committed in `models/mnist_gan.pth`, so the API works without retraining.
+
+| Method | Path | Parameters | Returns |
+|---|---|---|---|
+| GET | `/gan/digits` | `num_images` (1-64, default 16), `seed` (optional) | PNG grid of generated digits |
+| GET | `/gan/model` | – | generator and discriminator architecture |
+
+Example:
+
+```
+curl "http://127.0.0.1:8000/gan/digits?num_images=16&seed=42" --output digits.png
+```
+
+Retrain the model: `uv run python train_mnist_gan.py 15`
