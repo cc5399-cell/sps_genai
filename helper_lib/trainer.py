@@ -102,3 +102,53 @@ def train_vae_model(model, data_loader, criterion, optimizer, device="cpu", epoc
 
     print("Finished Training")
     return model
+
+
+def train_gan(model, data_loader, criterion=None, optimizer=None, device="cpu", epochs=10,
+              n_critic=5, clip_value=0.01, lr=5e-5):
+    """Train a Wasserstein GAN (Module 6 notebook) and return it.
+
+    criterion: unused; the WGAN losses are computed directly from the critic scores.
+    optimizer: (generator_optimizer, critic_optimizer); if None, RMSprop(lr) is created for each.
+    The critic is updated n_critic times per generator update, and its weights are clipped
+    to [-clip_value, clip_value] to enforce the Lipschitz condition.
+    """
+    gen, critic = model.generator.to(device), model.critic.to(device)
+    if optimizer is None:
+        optimizer = (torch.optim.RMSprop(gen.parameters(), lr=lr),
+                     torch.optim.RMSprop(critic.parameters(), lr=lr))
+    opt_gen, opt_critic = optimizer
+    model.train()
+
+    for epoch in range(epochs):
+        progress = tqdm(data_loader, dynamic_ncols=True, desc=f"Epoch {epoch + 1}/{epochs}")
+        for batch_number, (real, _) in enumerate(progress):
+            real = real.to(device)
+            batch_size = real.size(0)
+
+            # Train the critic: loss = -(E[D(real)] - E[D(fake)])
+            for _ in range(n_critic):
+                noise = torch.randn(batch_size, model.z_dim, device=device)
+                fake = gen(noise).detach()
+                loss_critic = -(critic(real).mean() - critic(fake).mean())
+                critic.zero_grad()
+                loss_critic.backward()
+                opt_critic.step()
+                for p in critic.parameters():  # weight clipping
+                    p.data.clamp_(-clip_value, clip_value)
+
+            # Train the generator: loss = -E[D(G(z))]
+            noise = torch.randn(batch_size, model.z_dim, device=device)
+            loss_gen = -critic(gen(noise)).mean()
+            gen.zero_grad()
+            loss_gen.backward()
+            opt_gen.step()
+
+            if batch_number % 100 == 0:
+                progress.set_postfix({"D loss": f"{loss_critic.item():.4f}",
+                                      "G loss": f"{loss_gen.item():.4f}"})
+
+        print(f"Epoch {epoch + 1}: D loss={loss_critic.item():.4f}, G loss={loss_gen.item():.4f}")
+
+    print("Finished Training")
+    return model

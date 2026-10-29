@@ -1,16 +1,16 @@
-"""Data loading, moved from the Module 4 (CIFAR-10) and Module 5 (Fashion-MNIST) notebooks."""
+"""Data loading for the Module 4 (CIFAR-10), Module 5 (Fashion-MNIST) and Module 6 (GAN) notebooks."""
+import os
+
 import torch
+from PIL import Image
+from torch.utils.data import Dataset
 from torchvision import datasets, transforms
 
 
 def get_data_loader(data_dir, batch_size=32, train=True, dataset="CIFAR10", image_size=None):
     """Return a DataLoader for CIFAR-10 (default) or Fashion-MNIST.
 
-    data_dir: folder where the dataset is stored (downloaded on first use).
-    train: True for the training split (shuffled), False for the test split.
-    dataset: "CIFAR10" (3x32x32 color images) or "FashionMNIST" (1x28x28, padded to 1x32x32).
-    image_size: if set, CIFAR-10 images are resized to image_size x image_size
-                (Assignment 2 uses 64).
+    image_size: if set, CIFAR-10 images are resized to image_size x image_size.
     """
     name = dataset.lower()
     if name == "cifar10":
@@ -28,3 +28,45 @@ def get_data_loader(data_dir, batch_size=32, train=True, dataset="CIFAR10", imag
         raise ValueError(f"Unknown dataset '{dataset}'. Use 'CIFAR10' or 'FashionMNIST'.")
 
     return torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=train)
+
+
+class CustomImageDataset(Dataset):
+    """Images from a folder (e.g. manually downloaded CelebA), from the Module 6 GAN notebook."""
+
+    def __init__(self, root_dir, transform=None):
+        self.transform = transform
+        self.image_paths = [
+            os.path.join(root_dir, fname)
+            for fname in os.listdir(root_dir)
+            if fname.lower().endswith((".png", ".jpg", ".jpeg"))
+        ]
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        image = Image.open(self.image_paths[idx]).convert("RGB")
+        if self.transform:
+            image = self.transform(image)
+        return image, 0  # dummy label (not used in GANs)
+
+
+def get_gan_data_loader(data_dir, batch_size=64, dataset="CIFAR10"):
+    """Return a DataLoader of 3x64x64 images normalized to [-1, 1] (matches the generator's tanh).
+
+    dataset: "CIFAR10" (resized from 32x32) or "CelebA" (images in data_dir/img_align_celeba).
+    """
+    normalize = transforms.Normalize([0.5] * 3, [0.5] * 3)
+    name = dataset.lower()
+    if name == "cifar10":
+        transform = transforms.Compose([transforms.Resize(64), transforms.CenterCrop(64),
+                                        transforms.ToTensor(), normalize])
+        data = datasets.CIFAR10(root=data_dir, train=True, download=True, transform=transform)
+    elif name == "celeba":
+        transform = transforms.Compose([transforms.Resize(128), transforms.CenterCrop(64),
+                                        transforms.ToTensor(), normalize])
+        data = CustomImageDataset(os.path.join(data_dir, "img_align_celeba"), transform=transform)
+    else:
+        raise ValueError(f"Unknown dataset '{dataset}'. Use 'CIFAR10' or 'CelebA'.")
+
+    return torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=0)

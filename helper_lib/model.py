@@ -189,3 +189,57 @@ class AssignmentCNN(nn.Module):
 
 
 MODELS["AssignmentCNN"] = AssignmentCNN
+
+
+# ---------- Module 6: Wasserstein GAN (from the Module 6 GAN notebook) ----------
+
+class Critic(nn.Module):
+    """WGAN critic: 3x64x64 image -> one unbounded realness score."""
+
+    def __init__(self):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(3, 64, 4, 2, 1, bias=False), nn.BatchNorm2d(64), nn.LeakyReLU(0.2, inplace=True),      # 64 -> 32
+            nn.Conv2d(64, 128, 4, 2, 1, bias=False), nn.BatchNorm2d(128), nn.LeakyReLU(0.2, inplace=True),    # 32 -> 16
+            nn.Conv2d(128, 256, 4, 2, 1, bias=False), nn.BatchNorm2d(256), nn.LeakyReLU(0.2, inplace=True),   # 16 -> 8
+            nn.Conv2d(256, 512, 4, 2, 1, bias=False), nn.BatchNorm2d(512), nn.LeakyReLU(0.2, inplace=True),   # 8 -> 4
+            nn.Conv2d(512, 1, 4, 1, 0, bias=False),                                                           # 4 -> 1
+            nn.Flatten(),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class Generator(nn.Module):
+    """WGAN generator: z_dim noise vector -> 3x64x64 image in [-1, 1]."""
+
+    def __init__(self, z_dim=100):
+        super().__init__()
+        self.z_dim = z_dim
+        self.net = nn.Sequential(
+            nn.ConvTranspose2d(z_dim, 512, 4, 1, 0, bias=False), nn.BatchNorm2d(512, momentum=0.9), nn.ReLU(True),  # 1 -> 4
+            nn.ConvTranspose2d(512, 256, 4, 2, 1, bias=False), nn.BatchNorm2d(256, momentum=0.9), nn.ReLU(True),    # 4 -> 8
+            nn.ConvTranspose2d(256, 128, 4, 2, 1, bias=False), nn.BatchNorm2d(128, momentum=0.9), nn.ReLU(True),    # 8 -> 16
+            nn.ConvTranspose2d(128, 64, 4, 2, 1, bias=False), nn.BatchNorm2d(64, momentum=0.9), nn.ReLU(True),      # 16 -> 32
+            nn.ConvTranspose2d(64, 3, 4, 2, 1), nn.Tanh(),                                                          # 32 -> 64
+        )
+
+    def forward(self, z):
+        return self.net(z.view(z.size(0), self.z_dim, 1, 1))
+
+
+class GAN(nn.Module):
+    """Holds the generator and critic together so the GAN works with get_model()."""
+
+    def __init__(self, z_dim=100):
+        super().__init__()
+        self.z_dim = z_dim
+        self.generator = Generator(z_dim)
+        self.critic = Critic()
+
+    def forward(self, z):
+        return self.generator(z)
+
+
+MODELS["GAN"] = GAN
