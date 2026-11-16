@@ -148,3 +148,9 @@ def gan_info():
     if digit_generator is None:
         raise HTTPException(status_code=503, detail="GAN weights not found.")
     return digit_generator.describe()
+
+
+# ---------- Text generation routers (Modules 7 and 9) ----------
+from app.rnn_api import router as rnn_router  # noqa: E402
+
+app.include_router(rnn_router)

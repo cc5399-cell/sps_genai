@@ -197,3 +197,32 @@ def train_standard_gan(model, data_loader, criterion=None, optimizer=None, devic
 
     print("Finished Training")
     return model
+
+
+
+def train_rnn_model(model, data_loader, criterion, optimizer, device="cpu", epochs=10):
+    """Train a next-word language model (Module 6 RNN notebook) and return it."""
+    model.to(device)
+    model.train()
+
+    for epoch in range(epochs):
+        total_loss = 0.0
+        progress = tqdm(data_loader, dynamic_ncols=True, desc=f"Epoch {epoch + 1}/{epochs}")
+        for batch_number, (inputs, targets) in enumerate(progress):
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs, _ = model(inputs)
+            # Flatten (batch, seq, vocab) so every position is one classification problem
+            loss = criterion(outputs.view(-1, outputs.size(-1)), targets.view(-1))
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            if batch_number % 100 == 0:
+                progress.set_postfix({"avg loss": f"{total_loss / (batch_number + 1):.4f}"})
+
+        print(f"Epoch {epoch + 1}: average loss = {total_loss / len(data_loader):.4f}")
+
+    print("Finished Training")
+    return model

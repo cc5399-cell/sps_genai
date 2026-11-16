@@ -295,3 +295,24 @@ class MNISTGAN(nn.Module):
 
 
 MODELS["MNISTGAN"] = MNISTGAN
+
+
+
+# ---------- Module 7: LSTM text generator (from the Module 6 RNN notebook) ----------
+
+class LSTMModel(nn.Module):
+    """Word-level language model: embedding -> LSTM -> linear layer scoring every vocabulary word."""
+
+    def __init__(self, vocab_size=10000, embedding_dim=100, hidden_dim=128):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim, batch_first=True)
+        self.fc = nn.Linear(hidden_dim, vocab_size)
+
+    def forward(self, x, hidden=None):
+        x = self.embedding(x)
+        x, hidden = self.lstm(x, hidden)
+        return self.fc(x), hidden
+
+
+MODELS["LSTM"] = LSTMModel
