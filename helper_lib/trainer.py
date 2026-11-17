@@ -261,3 +261,69 @@ def train_diffusion(model, data_loader, criterion=None, optimizer=None, device="
 
     print("Finished Training")
     return model
+
+
+# ---------- Assignment 4: Energy-based model training (Module 7 notebook) ----------
+
+class ReplayBuffer:
+    """Recent Langevin samples, so each step continues from earlier ones (Module 7 notebook)."""
+
+    def __init__(self, model, image_shape, device, size=8192):
+        self.model = model
+        self.image_shape = tuple(image_shape)
+        self.device = device
+        self.size = size
+        self.examples = [torch.rand((1, *self.image_shape), device=device) * 2 - 1 for _ in range(128)]
+
+    def sample_new_exmps(self, batch_size, steps, step_size, noise):
+        # About 5% fresh random images, the rest continued from the buffer
+        n_new = int((torch.rand(batch_size) < 0.05).sum())
+        new_rand_imgs = torch.rand((n_new, *self.image_shape), device=self.device) * 2 - 1
+        idx = torch.randint(len(self.examples), (batch_size - n_new,))
+        old_imgs = torch.cat([self.examples[i] for i in idx], dim=0)
+
+        new_imgs = self.model.sample(torch.cat([new_rand_imgs, old_imgs], dim=0), steps, step_size, noise)
+
+        self.examples = (list(torch.split(new_imgs, 1, dim=0)) + self.examples)[:self.size]
+        return new_imgs
+
+
+def train_ebm(model, data_loader, optimizer=None, device="cpu", epochs=10,
+              alpha=0.1, steps=60, step_size=10.0, noise=0.005):
+    """Train an EnergyModel with contrastive divergence (Module 7 notebook) and return it.
+
+    Expects images in [0, 1] (they are rescaled to [-1, 1] here).
+    Loss = E(real) - E(fake) + alpha * (E(real)^2 + E(fake)^2): push energy down on real
+    images and up on Langevin samples, with a regularizer that keeps energies small.
+    """
+    model.to(device)
+    optimizer = optimizer or torch.optim.Adam(model.parameters(), lr=1e-4, betas=(0.0, 0.999))
+    buffer = ReplayBuffer(model, data_loader.dataset[0][0].shape, device)
+
+    for epoch in range(epochs):
+        model.train()
+        progress = tqdm(data_loader, dynamic_ncols=True, desc=f"Epoch {epoch + 1}/{epochs}")
+        for real_imgs, _ in progress:
+            real_imgs = real_imgs.to(device) * 2 - 1
+            real_imgs = (real_imgs + torch.randn_like(real_imgs) * noise).clamp(-1.0, 1.0)
+            fake_imgs = buffer.sample_new_exmps(real_imgs.size(0), steps, step_size, noise)
+
+            out = model(torch.cat([real_imgs, fake_imgs], dim=0))
+            real_out, fake_out = torch.split(out, [real_imgs.size(0), fake_imgs.size(0)], dim=0)
+            cdiv_loss = real_out.mean() - fake_out.mean()
+            reg_loss = alpha * (real_out.pow(2).mean() + fake_out.pow(2).mean())
+            loss = cdiv_loss + reg_loss
+
+            optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=0.1)
+            optimizer.step()
+
+            progress.set_postfix({"loss": f"{loss.item():.4f}", "real": f"{real_out.mean().item():.3f}",
+                                  "fake": f"{fake_out.mean().item():.3f}"})
+
+        print(f"Epoch {epoch + 1}: loss={loss.item():.4f}, "
+              f"E(real)={real_out.mean().item():.3f}, E(fake)={fake_out.mean().item():.3f}")
+
+    print("Finished Training")
+    return model

@@ -86,3 +86,19 @@ curl "http://127.0.0.1:8000/gan/digits?num_images=16&seed=42" --output digits.pn
 ```
 
 Retrain the model: `uv run python train_mnist_gan.py 15`
+
+
+## Assignment 4: Energy-Based Model and Diffusion Model on CIFAR-10
+
+Training (weights are saved to `models/`):
+- `uv run python train_ebm_cifar.py 5` trains `EnergyModel` (`helper_lib/model.py`) with contrastive divergence, Langevin dynamics and a replay buffer (`train_ebm` in `helper_lib/trainer.py`). Output: `models/ebm_cifar10.pth`
+- `uv run python train_diffusion_cifar.py 10` trains `DiffusionModel(image_size=32)` (UNet with sinusoidal time embedding, offset cosine schedule, EMA). Output: `models/diffusion_cifar10.pth`
+
+API endpoints (each returns a PNG grid of images):
+- `GET /diffusion/generate?num_images=8&diffusion_steps=50&seed=1`
+- `GET /ebm/generate?num_images=8&steps=256&seed=1`
+
+Run with Docker:
+    docker build -t sps-genai .
+    docker run --rm -p 8000:80 sps-genai
+Then open http://localhost:8000/docs

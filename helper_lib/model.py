@@ -510,3 +510,56 @@ class DiffusionModel(nn.Module):
 
 
 MODELS["Diffusion"] = DiffusionModel
+
+
+# ---------- Assignment 4: Energy-based model (from the Module 7 Energy-Based Methods notebook) ----------
+import torch.nn.functional as F  # noqa: E402
+
+
+class EnergyModel(nn.Module):
+    """CNN mapping an image in [-1, 1] to a scalar energy: low = realistic, high = unrealistic."""
+
+    def __init__(self, in_channels=3, image_size=32):
+        super().__init__()
+        self.in_channels = in_channels
+        self.image_size = image_size
+        self.conv1 = nn.Conv2d(in_channels, 16, kernel_size=5, stride=2, padding=2)  # 32 -> 16
+        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=2, padding=1)           # 16 -> 8
+        self.conv3 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)           # 8 -> 4
+        self.conv4 = nn.Conv2d(64, 64, kernel_size=3, stride=2, padding=1)           # 4 -> 2
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(64 * 2 * 2, 64)
+        self.fc2 = nn.Linear(64, 1)
+
+    def forward(self, x):
+        x = F.silu(self.conv1(x))  # swish activation: x * sigmoid(x)
+        x = F.silu(self.conv2(x))
+        x = F.silu(self.conv3(x))
+        x = F.silu(self.conv4(x))
+        x = F.silu(self.fc1(self.flatten(x)))
+        return self.fc2(x)
+
+    def sample(self, inp_imgs, steps=60, step_size=10.0, noise_std=0.005):
+        """Langevin dynamics: gradient descent on the INPUT images to lower their energy.
+
+        The weights stay fixed; only the images change. enable_grad() keeps this working
+        even when called inside torch.no_grad() (e.g. from the API).
+        """
+        was_training = self.training
+        self.eval()
+        with torch.enable_grad():
+            for _ in range(steps):
+                with torch.no_grad():
+                    inp_imgs = (inp_imgs + torch.randn_like(inp_imgs) * noise_std).clamp(-1.0, 1.0)
+                inp_imgs.requires_grad_(True)
+                energy = self(inp_imgs)
+                # Derivative of the energy with respect to the images, not the weights
+                grads, = torch.autograd.grad(energy, inp_imgs, grad_outputs=torch.ones_like(energy))
+                with torch.no_grad():
+                    inp_imgs = (inp_imgs - step_size * grads.clamp(-0.03, 0.03)).clamp(-1.0, 1.0)
+        self.train(was_training)
+        return inp_imgs.detach()
+
+
+MODELS["EBM"] = EnergyModel
+MODELS["DiffusionCIFAR"] = lambda: DiffusionModel(image_size=32)  # CIFAR-10 images are 32x32

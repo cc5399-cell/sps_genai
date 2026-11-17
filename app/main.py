@@ -158,3 +158,8 @@ app.include_router(rnn_router)
 from app.llm_api import router as llm_router  # noqa: E402
 
 app.include_router(llm_router)
+
+
+# ---------- Image generation router (Assignment 4: Diffusion + EBM on CIFAR-10) ----------
+from app.image_gen_api import router as image_gen_router  # noqa: E402
+app.include_router(image_gen_router)
