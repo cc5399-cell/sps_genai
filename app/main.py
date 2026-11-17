@@ -154,3 +154,7 @@ def gan_info():
 from app.rnn_api import router as rnn_router  # noqa: E402
 
 app.include_router(rnn_router)
+
+from app.llm_api import router as llm_router  # noqa: E402
+
+app.include_router(llm_router)

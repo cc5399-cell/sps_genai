@@ -17,3 +17,6 @@ dist/
 # Datasets and trained weights
 data/
 checkpoints/
+
+# Fine-tuned LLM (too large for GitHub)
+models/gpt2-qa/
