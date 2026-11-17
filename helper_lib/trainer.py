@@ -226,3 +226,38 @@ def train_rnn_model(model, data_loader, criterion, optimizer, device="cpu", epoc
 
     print("Finished Training")
     return model
+
+
+
+def train_diffusion(model, data_loader, criterion=None, optimizer=None, device="cpu", epochs=10):
+    """Train a DiffusionModel (Module 8 notebook) and return it.
+
+    criterion: defaults to L1Loss between predicted and true noise.
+    optimizer: defaults to AdamW(lr=1e-3, weight_decay=1e-4) on the main network.
+    """
+    criterion = criterion or torch.nn.L1Loss()
+    optimizer = optimizer or torch.optim.AdamW(model.network.parameters(), lr=1e-3, weight_decay=1e-4)
+    model.to(device)
+
+    # Per-channel mean and std of the training images, used to normalize them
+    total, mean, std = 0, 0.0, 0.0
+    for images, _ in data_loader:
+        n = images.size(0)
+        flat = images.view(n, images.size(1), -1)
+        mean = mean + flat.mean(dim=(0, 2)) * n
+        std = std + flat.std(dim=(0, 2)) * n
+        total += n
+    model.set_normalizer((mean / total).to(device), (std / total).to(device))
+
+    for epoch in range(epochs):
+        model.train()
+        losses = []
+        progress = tqdm(data_loader, dynamic_ncols=True, desc=f"Epoch {epoch + 1}/{epochs}")
+        for images, _ in progress:
+            loss = model.train_step(images.to(device), optimizer, criterion)
+            losses.append(loss)
+            progress.set_postfix(loss=f"{loss:.4f}")
+        print(f"Epoch {epoch + 1}: average loss = {sum(losses) / len(losses):.4f}")
+
+    print("Finished Training")
+    return model

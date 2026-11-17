@@ -316,3 +316,197 @@ class LSTMModel(nn.Module):
 
 
 MODELS["LSTM"] = LSTMModel
+
+
+
+# ---------- Module 8: Diffusion model (from the Module 8 Diffusion notebook) ----------
+
+import copy
+import math
+
+
+def offset_cosine_diffusion_schedule(diffusion_times, min_signal_rate=0.02, max_signal_rate=0.95):
+    """Map diffusion times in [0, 1] to (noise_rates, signal_rates), with noise^2 + signal^2 = 1."""
+    start_angle = math.acos(max_signal_rate)
+    end_angle = math.acos(min_signal_rate)
+    diffusion_angles = start_angle + diffusion_times * (end_angle - start_angle)
+    return torch.sin(diffusion_angles), torch.cos(diffusion_angles)
+
+
+class SinusoidalEmbedding(nn.Module):
+    """Encode the noise variance as sines and cosines at 16 frequencies (32 numbers)."""
+
+    def __init__(self, num_frequencies=16):
+        super().__init__()
+        self.num_frequencies = num_frequencies
+        frequencies = torch.exp(torch.linspace(math.log(1.0), math.log(1000.0), num_frequencies))
+        self.register_buffer("angular_speeds", 2.0 * math.pi * frequencies.view(1, 1, 1, -1))
+
+    def forward(self, x):
+        # x: (B, 1, 1, 1) -> (B, 1, 1, 2 * num_frequencies)
+        x = x.expand(-1, 1, 1, self.num_frequencies)
+        return torch.cat([torch.sin(self.angular_speeds * x), torch.cos(self.angular_speeds * x)], dim=-1)
+
+
+class ResidualBlock(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1) if in_channels != out_channels else nn.Identity()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+
+    def forward(self, x):
+        residual = self.proj(x)
+        x = F.silu(self.conv1(x))  # swish activation
+        x = self.conv2(x)
+        return x + residual
+
+
+class DownBlock(nn.Module):
+    """Residual blocks (saving each output as a skip connection), then halve the resolution."""
+
+    def __init__(self, width, block_depth, in_channels):
+        super().__init__()
+        self.blocks = nn.ModuleList()
+        for _ in range(block_depth):
+            self.blocks.append(ResidualBlock(in_channels, width))
+            in_channels = width
+        self.pool = nn.AvgPool2d(kernel_size=2)
+
+    def forward(self, x, skips):
+        for block in self.blocks:
+            x = block(x)
+            skips.append(x)
+        return self.pool(x)
+
+
+class UpBlock(nn.Module):
+    """Double the resolution, then residual blocks that each consume one skip connection."""
+
+    def __init__(self, width, block_depth, in_channels):
+        super().__init__()
+        self.blocks = nn.ModuleList()
+        for _ in range(block_depth):
+            self.blocks.append(ResidualBlock(in_channels + width, width))
+            in_channels = width
+
+    def forward(self, x, skips):
+        x = F.interpolate(x, scale_factor=2, mode="bilinear", align_corners=False)
+        for block in self.blocks:
+            x = torch.cat([x, skips.pop()], dim=1)
+            x = block(x)
+        return x
+
+
+class UNet(nn.Module):
+    """Predicts the noise in a noisy image, given the image and its noise variance."""
+
+    def __init__(self, image_size=64, num_channels=3, embedding_dim=32):
+        super().__init__()
+        self.image_size = image_size
+        self.num_channels = num_channels
+        self.initial = nn.Conv2d(num_channels, 32, kernel_size=1)
+        self.embedding = SinusoidalEmbedding(num_frequencies=embedding_dim // 2)
+
+        self.down1 = DownBlock(32, in_channels=32 + embedding_dim, block_depth=2)
+        self.down2 = DownBlock(64, in_channels=32, block_depth=2)
+        self.down3 = DownBlock(96, in_channels=64, block_depth=2)
+        self.mid1 = ResidualBlock(in_channels=96, out_channels=128)
+        self.mid2 = ResidualBlock(in_channels=128, out_channels=128)
+        self.up1 = UpBlock(96, in_channels=128, block_depth=2)
+        self.up2 = UpBlock(64, in_channels=96, block_depth=2)
+        self.up3 = UpBlock(32, in_channels=64, block_depth=2)
+
+        self.final = nn.Conv2d(32, num_channels, kernel_size=1)
+        nn.init.zeros_(self.final.weight)
+
+    def forward(self, noisy_images, noise_variances):
+        skips = []
+        x = self.initial(noisy_images)
+        noise_emb = self.embedding(noise_variances).permute(0, 3, 1, 2)  # (B, 32, 1, 1)
+        noise_emb = F.interpolate(noise_emb, size=(self.image_size, self.image_size), mode="nearest")
+        x = torch.cat([x, noise_emb], dim=1)
+
+        x = self.down1(x, skips)
+        x = self.down2(x, skips)
+        x = self.down3(x, skips)
+        x = self.mid1(x)
+        x = self.mid2(x)
+        x = self.up1(x, skips)
+        x = self.up2(x, skips)
+        x = self.up3(x, skips)
+        return self.final(x)
+
+
+class DiffusionModel(nn.Module):
+    """Denoising diffusion model: a UNet plus an EMA copy used for generation."""
+
+    def __init__(self, image_size=64, num_channels=3, schedule_fn=offset_cosine_diffusion_schedule, ema_decay=0.8):
+        super().__init__()
+        self.network = UNet(image_size, num_channels)
+        self.ema_network = copy.deepcopy(self.network)
+        self.ema_decay = ema_decay
+        self.schedule_fn = schedule_fn
+        # Per-channel normalization statistics, saved with the weights
+        self.register_buffer("normalizer_mean", torch.zeros(1, num_channels, 1, 1))
+        self.register_buffer("normalizer_std", torch.ones(1, num_channels, 1, 1))
+
+    def set_normalizer(self, mean, std):
+        self.normalizer_mean.copy_(mean.reshape_as(self.normalizer_mean))
+        self.normalizer_std.copy_(std.reshape_as(self.normalizer_std))
+
+    def denormalize(self, x):
+        return torch.clamp(x * self.normalizer_std + self.normalizer_mean, 0.0, 1.0)
+
+    def denoise(self, noisy_images, noise_rates, signal_rates, training):
+        # Main network while training, EMA network for inference
+        network = self.network if training else self.ema_network
+        pred_noises = network(noisy_images, noise_rates ** 2)
+        pred_images = (noisy_images - noise_rates * pred_noises) / signal_rates
+        return pred_noises, pred_images
+
+    def reverse_diffusion(self, initial_noise, diffusion_steps):
+        step_size = 1.0 / diffusion_steps
+        current_images = initial_noise
+        for step in range(diffusion_steps):
+            t = torch.ones((initial_noise.shape[0], 1, 1, 1), device=initial_noise.device) * (1 - step * step_size)
+            noise_rates, signal_rates = self.schedule_fn(t)
+            pred_noises, pred_images = self.denoise(current_images, noise_rates, signal_rates, training=False)
+            next_noise_rates, next_signal_rates = self.schedule_fn(t - step_size)
+            current_images = next_signal_rates * pred_images + next_noise_rates * pred_noises
+        return pred_images
+
+    def generate(self, num_images, diffusion_steps):
+        """Start from pure Gaussian noise and denoise it step by step into images in [0, 1]."""
+        size = self.network.image_size
+        initial_noise = torch.randn((num_images, self.network.num_channels, size, size),
+                                    device=self.normalizer_mean.device)
+        with torch.no_grad():
+            return self.denormalize(self.reverse_diffusion(initial_noise, diffusion_steps))
+
+    def train_step(self, images, optimizer, loss_fn):
+        images = (images - self.normalizer_mean) / self.normalizer_std
+        noises = torch.randn_like(images)
+
+        # Corrupt each image with a random amount of noise
+        diffusion_times = torch.rand((images.size(0), 1, 1, 1), device=images.device)
+        noise_rates, signal_rates = self.schedule_fn(diffusion_times)
+        noisy_images = signal_rates * images + noise_rates * noises
+
+        # Train the network to predict the noise that was added
+        pred_noises, _ = self.denoise(noisy_images, noise_rates, signal_rates, training=True)
+        loss = loss_fn(pred_noises, noises)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        # Update the EMA copy, which generate() uses
+        with torch.no_grad():
+            for ema_param, param in zip(self.ema_network.parameters(), self.network.parameters()):
+                ema_param.copy_(self.ema_decay * ema_param + (1.0 - self.ema_decay) * param)
+
+        return loss.item()
+
+
+MODELS["Diffusion"] = DiffusionModel

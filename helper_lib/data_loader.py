@@ -73,3 +73,16 @@ def get_gan_data_loader(data_dir, batch_size=64, dataset="CIFAR10"):
         raise ValueError(f"Unknown dataset '{dataset}'. Use 'MNIST', 'CIFAR10' or 'CelebA'.")
 
     return torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=True, num_workers=0)
+
+
+
+def get_diffusion_data_loader(data_dir, batch_size=64, train=True):
+    """Return a DataLoader of Flowers102 images, center-cropped and resized to 3x64x64 in [0, 1]."""
+    transform = transforms.Compose([
+        transforms.CenterCrop(340),
+        transforms.Resize((64, 64)),
+        transforms.ToTensor(),
+    ])
+    data = datasets.Flowers102(root=data_dir, split="train" if train else "val",
+                               download=True, transform=transform)
+    return torch.utils.data.DataLoader(data, batch_size=batch_size, shuffle=train, num_workers=0)
